@@ -1,0 +1,455 @@
+================================================================================
+DISCORD CLIPPING BOT - PROJECT OUTLINE
+================================================================================
+
+Based on flowchart: Commands for tracking clips, managing accounts, and payouts
+
+================================================================================
+PROJECT STRUCTURE
+================================================================================
+
+discord-clipping-bot/
+├── .env                    # Environment variables
+├── .env.example
+├── .gitignore
+├── requirements.txt        # Python dependencies
+├── README.md
+│
+├── bot/
+│   ├── __init__.py
+│   ├── main.py             # Bot entry point
+│   └── config.py           # Load env vars
+│
+├── database/
+│   ├── __init__.py
+│   ├── models.py           # SQLAlchemy models
+│   ├── database.py         # DB connection & session
+│   └── manager.py          # DatabaseManager class
+│
+└── cogs/
+    ├── __init__.py
+    ├── stats.py            # /stats, /leaderboard
+    ├── uploads.py          # /upload, /bounty-upload
+    ├── accounts.py         # /add-account, /verify-status, /remove-account, /account-info
+    └── payments.py         # /add-paypal, /add-usdc, /add-sol-usdc, /payment-methods, /remove-payment-method, /payment-details
+
+
+================================================================================
+FILE: requirements.txt
+================================================================================
+
+discord.py>=2.3.0
+SQLAlchemy>=2.0.0
+python-dotenv>=1.0.0
+
+
+================================================================================
+FILE: bot/config.py
+================================================================================
+
+Functions needed:
+- Load environment variables:
+  - DISCORD_TOKEN
+  - CLIENT_ID
+  - GUILD_ID
+  - DATABASE_URL
+
+
+================================================================================
+FILE: bot/main.py
+================================================================================
+
+Classes:
+- ClippingBot(commands.Bot)
+
+Functions needed:
+- __init__()              # Setup intents
+- setup_hook()            # Load cogs, sync commands
+- on_ready()              # Log bot startup
+- main()                  # Entry point, start bot
+
+
+================================================================================
+FILE: database/models.py
+================================================================================
+
+ENUMS:
+- Platform: TIKTOK, INSTAGRAM, YOUTUBE
+- ClipStatus: PENDING, APPROVED, REJECTED
+- PaymentType: PAYPAL, USDC, SOL_USDC
+
+--------------------------------------------------------------------------------
+MODEL: User
+--------------------------------------------------------------------------------
+- discord_id          String, Primary Key
+- username            String
+- total_unpaid_views  Integer, default=0
+- total_paid_views    Integer, default=0
+- created_at          DateTime
+
+Relationships:
+- accounts            One-to-Many -> SocialAccount
+- clips               One-to-Many -> Clip
+- payment_methods     One-to-Many -> PaymentMethod
+
+--------------------------------------------------------------------------------
+MODEL: SocialAccount
+--------------------------------------------------------------------------------
+- id                  Integer, Primary Key, Auto-increment
+- user_id             String, Foreign Key -> User.discord_id
+- platform            Enum(Platform)
+- handle              String
+- is_verified         Boolean, default=False
+- verification_code   String, 6 characters
+- created_at          DateTime
+
+Relationships:
+- user                Many-to-One -> User
+- clips               One-to-Many -> Clip
+
+--------------------------------------------------------------------------------
+MODEL: Clip
+--------------------------------------------------------------------------------
+- id                  Integer, Primary Key, Auto-increment
+- user_id             String, Foreign Key -> User.discord_id
+- account_id          Integer, Foreign Key -> SocialAccount.id
+- url                 String, Unique
+- view_count          Integer, default=0
+- like_count          Integer, default=0
+- comment_count       Integer, default=0
+- is_bounty           Boolean, default=False
+- bounty_tag          String, nullable
+- status              Enum(ClipStatus), default=PENDING
+- created_at          DateTime
+- last_updated        DateTime
+
+Relationships:
+- user                Many-to-One -> User
+- account             Many-to-One -> SocialAccount
+
+--------------------------------------------------------------------------------
+MODEL: PaymentMethod
+--------------------------------------------------------------------------------
+- id                  Integer, Primary Key, Auto-increment
+- user_id             String, Foreign Key -> User.discord_id
+- method_type         Enum(PaymentType)
+- email               String, nullable (for PayPal)
+- first_name          String, nullable (for PayPal)
+- last_name           String, nullable (for PayPal)
+- wallet_address      String, nullable (for USDC/SOL)
+- created_at          DateTime
+
+Relationships:
+- user                Many-to-One -> User
+
+
+================================================================================
+FILE: database/database.py
+================================================================================
+
+Functions needed:
+- get_engine()            # Create SQLAlchemy engine from DATABASE_URL
+- get_session()           # Create sessionmaker, return session factory
+- init_db()               # Create all tables (Base.metadata.create_all)
+
+
+================================================================================
+FILE: database/manager.py
+================================================================================
+
+Class: DatabaseManager
+
+--------------------------------------------------------------------------------
+USER MANAGEMENT
+--------------------------------------------------------------------------------
+- get_user(discord_id)
+    Returns: User object or None
+
+- create_user(discord_id, username)
+    Returns: User object
+
+- get_or_create_user(discord_id, username)
+    Returns: User object (existing or new)
+
+--------------------------------------------------------------------------------
+SOCIAL ACCOUNTS
+--------------------------------------------------------------------------------
+- add_social_account(discord_id, platform, handle)
+    Generates 6-char verification code
+    Returns: dict with verification_code
+
+- get_verification_status(discord_id, platform, handle)
+    Returns: dict with is_verified, verification_code or None
+
+- verify_account(discord_id, platform, handle)
+    Sets is_verified=True, clears verification_code
+    Returns: bool success
+
+- remove_account(discord_id, platform, handle)
+    Deletes the social account
+    Returns: bool success
+
+- get_account_info(discord_id)
+    Returns: dict with list of all accounts
+
+--------------------------------------------------------------------------------
+CLIPS / UPLOADS
+--------------------------------------------------------------------------------
+- submit_clip(discord_id, url, is_bounty=False, tag=None)
+    Creates Clip record
+    Returns: Clip object
+
+- submit_clips(discord_id, urls, is_bounty=False, tag=None)
+    Creates multiple Clip records
+    Returns: list of Clip objects
+
+- update_clip_stats(clip_id, views, likes, comments)
+    Updates view_count, like_count, comment_count, last_updated
+    Also updates User.total_unpaid_views
+    Returns: bool success
+
+- get_user_clips(discord_id)
+    Returns: list of Clip objects
+
+--------------------------------------------------------------------------------
+PAYMENTS
+--------------------------------------------------------------------------------
+- add_paypal(discord_id, email, first_name, last_name)
+    Creates PaymentMethod with type=PAYPAL
+    Returns: PaymentMethod object
+
+- add_usdc(discord_id, wallet_address)
+    Creates PaymentMethod with type=USDC
+    Returns: PaymentMethod object
+
+- add_sol_usdc(discord_id, wallet_address)
+    Creates PaymentMethod with type=SOL_USDC
+    Returns: PaymentMethod object
+
+- get_payment_methods(discord_id)
+    Returns: list of PaymentMethod objects
+
+- remove_payment_method(discord_id, method_type)
+    Deletes PaymentMethod by type
+    Returns: bool success
+
+- get_payment_details(discord_id)
+    Returns: dict with paypal info and wallets list
+
+--------------------------------------------------------------------------------
+STATS & LEADERBOARD
+--------------------------------------------------------------------------------
+- get_user_stats(discord_id)
+    Returns: dict with total_views, total_likes, total_comments,
+             clip_count, unpaid_views, paid_views
+
+- get_leaderboard(limit=10)
+    Returns: list of dicts with username, total_unpaid_views
+             sorted by total_unpaid_views DESC
+
+
+================================================================================
+FILE: cogs/stats.py
+================================================================================
+
+Class: StatsCog(commands.Cog)
+
+Commands:
+--------------------------------------------------------------------------------
+/stats
+--------------------------------------------------------------------------------
+- Description: View your personal stats
+- Parameters: None
+- Shows: total views, comments, likes, clip count, unpaid/paid views
+- Calls: db.get_user_stats(discord_id)
+
+--------------------------------------------------------------------------------
+/leaderboard [limit]
+--------------------------------------------------------------------------------
+- Description: View the top clippers by views
+- Parameters: limit (int, default=10, max=25)
+- Shows: ranked list of users by total_unpaid_views
+- Calls: db.get_leaderboard(limit)
+
+
+================================================================================
+FILE: cogs/uploads.py
+================================================================================
+
+Class: UploadsCog(commands.Cog)
+
+Commands:
+--------------------------------------------------------------------------------
+/upload [link1] [link2?] [link3?]
+--------------------------------------------------------------------------------
+- Description: Upload video link(s) to be tracked
+- Parameters:
+  - link1: str (required)
+  - link2: str (optional)
+  - link3: str (optional)
+- Action: Bot tracks view count, comment count, like count
+- Calls: db.submit_clips(discord_id, urls, is_bounty=False)
+
+--------------------------------------------------------------------------------
+/bounty-upload [tag] [link1] [link2?] [link3?]
+--------------------------------------------------------------------------------
+- Description: Upload video link(s) for a bounty/campaign
+- Parameters:
+  - tag: str (required) - campaign identifier
+  - link1: str (required)
+  - link2: str (optional)
+  - link3: str (optional)
+- Action: Same as /upload but stores with bounty tag for special campaigns
+- Calls: db.submit_clips(discord_id, urls, is_bounty=True, tag=tag)
+
+
+================================================================================
+FILE: cogs/accounts.py
+================================================================================
+
+Class: AccountsCog(commands.Cog)
+
+Platform choices: TikTok, Instagram, YouTube
+
+Commands:
+--------------------------------------------------------------------------------
+/add-account [platform] [username]
+--------------------------------------------------------------------------------
+- Description: Add a social media account to be tracked
+- Parameters:
+  - platform: Literal["TikTok", "Instagram", "YouTube"]
+  - username: str
+- Action: Generates verification code, user must add to bio
+- Calls: db.add_social_account(discord_id, platform, username)
+- Response: Shows verification code with instructions
+
+--------------------------------------------------------------------------------
+/verify-status [platform] [username]
+--------------------------------------------------------------------------------
+- Description: Check verification status of your account
+- Parameters:
+  - platform: Literal["TikTok", "Instagram", "YouTube"]
+  - username: str
+- Action: Checks if account is verified
+- Calls: db.get_verification_status(discord_id, platform, username)
+- Response: Shows verified or pending with code
+
+--------------------------------------------------------------------------------
+/remove-account [platform] [username]
+--------------------------------------------------------------------------------
+- Description: Remove a social media account
+- Parameters:
+  - platform: Literal["TikTok", "Instagram", "YouTube"]
+  - username: str
+- Action: Removes account from user's profile, no longer tracked
+- Calls: db.remove_account(discord_id, platform, username)
+
+--------------------------------------------------------------------------------
+/account-info
+--------------------------------------------------------------------------------
+- Description: View all your linked accounts
+- Parameters: None
+- Action: Shows all linked accounts with verification status
+- Calls: db.get_account_info(discord_id)
+
+
+================================================================================
+FILE: cogs/payments.py
+================================================================================
+
+Class: PaymentsCog(commands.Cog)
+
+Payment platform choices: PayPal, USDC, SOL-USDC
+
+Commands:
+--------------------------------------------------------------------------------
+/add-paypal [email] [first_name] [last_name]
+--------------------------------------------------------------------------------
+- Description: Add PayPal as a payment method
+- Parameters:
+  - email: str
+  - first_name: str
+  - last_name: str
+- Calls: db.add_paypal(discord_id, email, first_name, last_name)
+
+--------------------------------------------------------------------------------
+/add-usdc [wallet_address]
+--------------------------------------------------------------------------------
+- Description: Add USDC wallet address (ERC-20)
+- Parameters:
+  - wallet_address: str
+- Calls: db.add_usdc(discord_id, wallet_address)
+
+--------------------------------------------------------------------------------
+/add-sol-usdc [wallet_address]
+--------------------------------------------------------------------------------
+- Description: Add Solana USDC wallet address
+- Parameters:
+  - wallet_address: str
+- Calls: db.add_sol_usdc(discord_id, wallet_address)
+
+--------------------------------------------------------------------------------
+/payment-methods
+--------------------------------------------------------------------------------
+- Description: View all your payment methods
+- Parameters: None
+- Calls: db.get_payment_methods(discord_id)
+
+--------------------------------------------------------------------------------
+/remove-payment-method [platform]
+--------------------------------------------------------------------------------
+- Description: Remove a payment method
+- Parameters:
+  - platform: Literal["PayPal", "USDC", "SOL-USDC"]
+- Calls: db.remove_payment_method(discord_id, platform)
+
+--------------------------------------------------------------------------------
+/payment-details
+--------------------------------------------------------------------------------
+- Description: View detailed payment information
+- Parameters: None
+- Calls: db.get_payment_details(discord_id)
+
+
+================================================================================
+BUILD ORDER (RECOMMENDED)
+================================================================================
+
+1. database/models.py      - Define all SQLAlchemy models first
+2. database/database.py    - Setup DB connection
+3. database/manager.py     - Build each method one by one
+4. bot/config.py           - Load env vars
+5. bot/main.py             - Bot startup
+6. cogs/stats.py           - /stats, /leaderboard
+7. cogs/uploads.py         - /upload, /bounty-upload
+8. cogs/accounts.py        - Account management commands
+9. cogs/payments.py        - Payment management commands
+
+
+================================================================================
+COMMAND SUMMARY (FROM FLOWCHART)
+================================================================================
+
+STATS:
+  /stats                              -> Shows user's views, comments, likes
+  /leaderboard                        -> Top users by unpaid views
+
+UPLOADS:
+  /upload [link1,link2,link3]         -> Upload video links to track
+  /bounty-upload [tag] [links]        -> Upload for special campaigns
+
+ACCOUNTS:
+  /add-account [platform] [username]  -> Link social account (get verification code)
+  /verify-status [platform] [username]-> Check if account is verified
+  /remove-account [platform] [username]-> Unlink account
+  /account-info                       -> View all linked accounts
+
+PAYMENTS:
+  /add-paypal [email] [name]          -> Add PayPal
+  /add-usdc [wallet]                  -> Add ERC-20 USDC wallet
+  /add-sol-usdc [wallet]              -> Add Solana USDC wallet
+  /payment-methods                    -> List all payment methods
+  /remove-payment-method [platform]   -> Remove a payment method
+  /payment-details                    -> Show all payment info
+
+================================================================================

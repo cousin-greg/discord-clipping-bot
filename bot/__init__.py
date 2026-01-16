@@ -1,1 +1,0 @@
-# Discord Clipping Bot - Python Implementation
