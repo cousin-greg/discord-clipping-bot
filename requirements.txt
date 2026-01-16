@@ -1,0 +1,14 @@
+# Discord Bot
+discord.py>=2.3.0
+
+# Database
+SQLAlchemy>=2.0.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Async database support (optional, for PostgreSQL)
+asyncpg>=0.29.0
+
+# For type hints
+typing-extensions>=4.0.0
